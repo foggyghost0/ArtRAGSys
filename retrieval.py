@@ -1,10 +1,9 @@
 from rdflib import Graph, URIRef, Literal
 from rdflib.namespace import RDF, RDFS
 import sqlite3
-#from init_knowledge_graph import namespaces #removed
 import hnswlib
 import numpy as np
-from init_knowledge_graph import Namespace #added
+from init_knowledge_graph import Namespace 
 
 KG_FILE = "knowledge_graph.ttl"
 DB_FILE = "artrag.db"
@@ -27,7 +26,7 @@ def hybrid_retrieve(query):
     hnsw_results = retrieve_similar_artworks(query) # Added HNSW retrieval
 
     # Combine and rank results
-    combined_results = combine_results(sqlite_results, kg_results, hnsw_results) # Added HNSW results
+    combined_results = combine_results(sqlite_results, kg_results, hnsw_results, query) # Added HNSW results
     return combined_results
 
 def is_relationship_query(query):
@@ -76,7 +75,7 @@ def retrieve_from_sqlite(query):
     try:
         cursor.execute(
             """
-            SELECT image_file, title, description FROM artworks
+            SELECT id, image_file, title, description, type_id, timeframe FROM artworks
             WHERE artwork_search MATCH ?
             """,
             (query,)
@@ -146,10 +145,76 @@ def retrieve_similar_artworks(query, top_k=5):
 
     return similar_artworks
 
-def combine_results(sqlite_results, kg_results, hnsw_results):
+def combine_results(sqlite_results, kg_results, hnsw_results, query):
     """
     Combines and ranks results from SQLite, the knowledge graph, and HNSW.
     """
-    # Simple concatenation for demonstration
-    combined = sqlite_results + kg_results + [(artwork, "HNSW Similarity") for artwork in hnsw_results]
-    return combined
+    # Define weights for different factors
+    exact_match_weight = 0.7
+    keyword_match_weight = 0.2
+    hnsw_similarity_weight = 0.5
+    type_weight = 0.3
+    timeframe_weight = 0.1
+
+    # Prepare combined results with scores
+    combined_results = []
+
+    # Score SQLite results
+    for artwork_id, image_file, title, description, type_id, timeframe in sqlite_results:
+        score = 0
+
+        # Exact match bonus
+        if query.lower() == title.lower() or query.lower() in description.lower():
+            score += exact_match_weight
+
+        # Keyword match score (simple presence check)
+        if query.lower() in title.lower() or query.lower() in description.lower():
+            score += keyword_match_weight
+
+        # Fetch type and timeframe from database
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM artwork_types WHERE id = ?", (type_id,))
+        artwork_type = cursor.fetchone()[0]
+        conn.close()
+
+        # Type match
+        if artwork_type and query.lower() in artwork_type.lower():
+            score += type_weight
+
+        # Timeframe match
+        if timeframe and query.lower() in timeframe.lower():
+            score += timeframe_weight
+
+        combined_results.append({
+            'source': 'SQLite',
+            'image_file': image_file,
+            'title': title,
+            'description': description,
+            'score': score
+        })
+
+    # Score KG results (simplified, can be enhanced)
+    for subject, predicate, obj in kg_results:
+        score = keyword_match_weight  # Basic relevance score
+        combined_results.append({
+            'source': 'Knowledge Graph',
+            'subject': subject,
+            'predicate': predicate,
+            'object': obj,
+            'score': score
+        })
+
+    # Score HNSW results
+    for artwork in hnsw_results:
+        score = hnsw_similarity_weight  # Assign HNSW weight
+        combined_results.append({
+            'source': 'HNSW Similarity',
+            'title': artwork,
+            'score': score
+        })
+
+    # Rank the combined results based on the score
+    ranked_results = sorted(combined_results, key=lambda x: x['score'], reverse=True)
+
+    return ranked_results
