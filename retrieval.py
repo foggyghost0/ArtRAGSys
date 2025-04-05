@@ -1,7 +1,7 @@
 from rdflib import Graph, URIRef, Literal
 from rdflib.namespace import RDF, RDFS
 import sqlite3
-
+from init_knowledge_graph import namespaces
 KG_FILE = "knowledge_graph.ttl"
 DB_FILE = "artrag.db"
 

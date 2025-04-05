@@ -7,11 +7,11 @@ DB_FILE = 'artrag.db'
 KG_FILE = "knowledge_graph.ttl"
 
 # Define namespaces
-ART = Namespace("http://example.org/art/")  # Namespace for artworks
-AUTH = Namespace("http://example.org/author/")  # Namespace for authors
-SCHOOL = Namespace("http://example.org/school/")  # Namespace for schools
-TYPE = Namespace("http://example.org/type/")  # Namespace for artwork types
-REL = Namespace("http://example.org/relation/")  # Namespace for relationships
+ART = Namespace("ART")  # Namespace for artworks
+AUTH = Namespace("AUTH")  # Namespace for authors
+SCHOOL = Namespace("SCHOOL")  # Namespace for schools
+TYPE = Namespace("TYPE")  # Namespace for artwork types
+REL = Namespace("REL")  # Namespace for relationships
 
 def create_knowledge_graph():
     """
@@ -82,11 +82,6 @@ def create_knowledge_graph():
         if school_id:
             school_uri = SCHOOL[str(school_id)]
             kg.add((artwork_uri, REL.belongs_to, school_uri))
-
-    # (Optional) Add "influenced_by" relationships (This would require a separate process
-    # to determine stylistic similarities, historical connections, etc.)
-    # For example, you could compare descriptions or techniques and add relationships
-    # based on a similarity threshold.  This is a complex task and depends on your data.
 
     # Serialize the knowledge graph to a file
     try:
