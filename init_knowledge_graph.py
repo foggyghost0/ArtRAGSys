@@ -106,7 +106,7 @@ def create_knowledge_graph():
 
 def generate_embeddings(kg):
     """
-    Generates knowledge graph embeddings using PyKEEN and builds HNSW index.
+    Generate knowledge graph embeddings using PyKEEN and builds HNSW index.
     """
     # Convert RDF graph to PyKEEN TriplesFactory
     triples = []
@@ -117,8 +117,8 @@ def generate_embeddings(kg):
 
     # Split the triples factory into training and testing
     training_factory = triples_factory
-    testing_factory = triples_factory  # Using same for both as we're not evaluating performance
-
+    testing_factory = triples_factory 
+    
     # Define and train the TransE model using PyKEEN pipeline
     result = pipeline(
         model='TransE',

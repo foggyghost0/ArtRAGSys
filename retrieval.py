@@ -73,9 +73,13 @@ def retrieve_from_sqlite(query):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     try:
+        # Query the artwork_search virtual table correctly
         cursor.execute(
             """
-            SELECT id, image_file, title, description, type_id, timeframe FROM artworks
+            SELECT artworks.id, artworks.image_file, artworks.title, artworks.description, 
+                   artworks.type_id, artworks.timeframe 
+            FROM artwork_search
+            JOIN artworks ON artwork_search.rowid = artworks.id
             WHERE artwork_search MATCH ?
             """,
             (query,)
@@ -92,28 +96,42 @@ def retrieve_similar_artworks(query, top_k=5):
     """
     Retrieves similar artworks using HNSW index based on a text query.
     """
-    # Load entity embeddings and HNSW index
-    entity_embeddings = np.load(EMBEDDING_MODEL_FILE)
-    hnsw_index = hnswlib.Index(space='cosine', dim=entity_embeddings.shape[1])
-    hnsw_index.load_index(HNSW_INDEX_FILE)
+    try:
+        # Load entity embeddings and HNSW index
+        entity_embeddings = np.load(EMBEDDING_MODEL_FILE)
+        hnsw_index = hnswlib.Index(space='cosine', dim=entity_embeddings.shape[1])
+        hnsw_index.load_index(HNSW_INDEX_FILE)
+    except Exception as e:
+        print(f"Error loading embeddings or index: {e}")
+        return []
 
-    # Load SQLite database to map artwork titles to IDs
+    # Load SQLite database to find matching artwork
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title FROM artworks")
-    artwork_titles = cursor.fetchall()
-    conn.close()
-
-    # Find the artwork ID that matches the query
-    artwork_id = None
-    for id, title in artwork_titles:
-        if query.lower() in title.lower():
-            artwork_id = id
-            break
-
-    if artwork_id is None:
-        print(f"Artwork with title '{query}' not found.")
+    
+    # Try to find direct matches in titles (case insensitive)
+    cursor.execute("SELECT id, title FROM artworks WHERE LOWER(title) LIKE LOWER(?)", (f"%{query}%",))
+    artwork_matches = cursor.fetchall()
+    
+    # If no matches in title, check authors too
+    if not artwork_matches:
+        cursor.execute("""
+            SELECT artworks.id, artworks.title 
+            FROM artworks 
+            JOIN authors ON artworks.author_id = authors.id
+            WHERE LOWER(authors.name) LIKE LOWER(?)
+        """, (f"%{query}%",))
+        artwork_matches = cursor.fetchall()
+    
+    # If still no matches, just return empty list
+    if not artwork_matches:
+        print(f"No artwork or author matching '{query}' found.")
+        conn.close()
         return []
+    
+    # Use the first match
+    artwork_id, matched_title = artwork_matches[0]
+    print(f"Found match: '{matched_title}' (ID: {artwork_id})")
 
     # Get the index of the artwork in the embeddings array
     artwork_index = artwork_id - 1  # Assuming artwork IDs start from 1
@@ -121,100 +139,90 @@ def retrieve_similar_artworks(query, top_k=5):
     # Check if the artwork index is valid
     if artwork_index < 0 or artwork_index >= len(entity_embeddings):
         print(f"Artwork index {artwork_index} is out of bounds.")
+        conn.close()
         return []
 
     # Query HNSW index for similar artworks
-    labels, distances = hnsw_index.knn_query(entity_embeddings[artwork_index].reshape(1, -1), k=top_k)
+    labels, distances = hnsw_index.knn_query(entity_embeddings[artwork_index].reshape(1, -1), k=top_k+1)
 
-     # Load SQLite database to map artwork titles to IDs
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
+    # Fetch all artwork titles for mapping
     cursor.execute("SELECT id, title FROM artworks")
-    artwork_titles = cursor.fetchall()
+    all_artwork_titles = {id: title for id, title in cursor.fetchall()}
     conn.close()
 
-    # Map the labels back to artwork titles
+    # Map the labels back to artwork titles (excluding the query artwork itself)
     similar_artworks = []
     for label in labels[0]:
-        # Find the artwork ID that matches the label
-        artwork_id = label + 1  # Assuming artwork IDs start from 1
-        for id, title in artwork_titles:
-            if id == artwork_id:
-                similar_artworks.append(title)
-                break
-
+        similar_id = label + 1  # Assuming artwork IDs start from 1
+        if similar_id in all_artwork_titles and similar_id != artwork_id:
+            similar_artworks.append(all_artwork_titles[similar_id])
+    
     return similar_artworks
 
 def combine_results(sqlite_results, kg_results, hnsw_results, query):
     """
-    Combines and ranks results from SQLite, the knowledge graph, and HNSW.
+    Combines results from SQLite, the knowledge graph, and HNSW using Reciprocal Rank Fusion.
     """
-    # Define weights for different factors
-    exact_match_weight = 0.7
-    keyword_match_weight = 0.2
-    hnsw_similarity_weight = 0.5
-    type_weight = 0.3
-    timeframe_weight = 0.1
-
-    # Prepare combined results with scores
-    combined_results = []
-
-    # Score SQLite results
-    for artwork_id, image_file, title, description, type_id, timeframe in sqlite_results:
-        score = 0
-
-        # Exact match bonus
-        if query.lower() == title.lower() or query.lower() in description.lower():
-            score += exact_match_weight
-
-        # Keyword match score (simple presence check)
-        if query.lower() in title.lower() or query.lower() in description.lower():
-            score += keyword_match_weight
-
-        # Fetch type and timeframe from database
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM artwork_types WHERE id = ?", (type_id,))
-        artwork_type = cursor.fetchone()[0]
-        conn.close()
-
-        # Type match
-        if artwork_type and query.lower() in artwork_type.lower():
-            score += type_weight
-
-        # Timeframe match
-        if timeframe and query.lower() in timeframe.lower():
-            score += timeframe_weight
-
-        combined_results.append({
-            'source': 'SQLite',
-            'image_file': image_file,
-            'title': title,
-            'description': description,
-            'score': score
-        })
-
-    # Score KG results (simplified, can be enhanced)
-    for subject, predicate, obj in kg_results:
-        score = keyword_match_weight  # Basic relevance score
-        combined_results.append({
-            'source': 'Knowledge Graph',
-            'subject': subject,
-            'predicate': predicate,
-            'object': obj,
-            'score': score
-        })
-
-    # Score HNSW results
-    for artwork in hnsw_results:
-        score = hnsw_similarity_weight  # Assign HNSW weight
-        combined_results.append({
-            'source': 'HNSW Similarity',
-            'title': artwork,
-            'score': score
-        })
-
-    # Rank the combined results based on the score
-    ranked_results = sorted(combined_results, key=lambda x: x['score'], reverse=True)
-
+    # Constant k for RRF formula (typical value is 60)
+    k = 60
+    
+    # Create dictionaries to store rankings from each source
+    all_items = {}
+    
+    # Process SQLite results
+    for rank, (artwork_id, image_file, title, description, type_id, timeframe) in enumerate(sqlite_results):
+        item_id = f"artwork:{artwork_id}"
+        if item_id not in all_items:
+            all_items[item_id] = {
+                'source': 'SQLite',
+                'image_file': image_file,
+                'title': title,
+                'description': description,
+                'rrf_score': 0
+            }
+        # Add RRF score contribution from SQLite ranking
+        all_items[item_id]['rrf_score'] += 1 / (k + rank)
+    
+    # Process KG results (convert triples to a form that can be ranked)
+    for rank, (subject, predicate, obj) in enumerate(kg_results):
+        item_id = subject  # Use subject as identifier
+        if item_id not in all_items:
+            all_items[item_id] = {
+                'source': 'Knowledge Graph',
+                'subject': subject,
+                'predicate': predicate,
+                'object': obj,
+                'rrf_score': 0
+            }
+        # Add RRF score contribution from KG ranking
+        all_items[item_id]['rrf_score'] += 1 / (k + rank)
+    
+    # Process HNSW results
+    for rank, artwork_title in enumerate(hnsw_results):
+        # Use title as identifier (ideally we'd use artwork_id, but we only have titles)
+        item_id = f"title:{artwork_title}"
+        if item_id not in all_items:
+            all_items[item_id] = {
+                'source': 'HNSW Similarity',
+                'title': artwork_title,
+                'rrf_score': 0
+            }
+        # Add RRF score contribution from HNSW ranking
+        all_items[item_id]['rrf_score'] += 1 / (k + rank)
+    
+    # Convert dictionary to list and sort by RRF score
+    ranked_results = list(all_items.values())
+    ranked_results.sort(key=lambda x: x['rrf_score'], reverse=True)
+    
     return ranked_results
+
+# Example usage
+if __name__ == "__main__":
+    query = "flowers"
+    # Example query to test the hybrid retrieval
+    print(f"Retrieving results for query: '{query}'")
+    results = hybrid_retrieve(query)
+    if results:
+        print(results[0])
+    else:
+        print("No results found.")
