@@ -202,60 +202,6 @@ def create_databases():
     print("Database and vector index creation complete!")
     conn.close()
 
-class ArtSearch:
-    def __init__(self):
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
-        self.index = faiss.read_index('art_vectors.faiss')
-        self.conn = sqlite3.connect('art_database.db')
-    
-    def semantic_search(self, query, k=5):
-        """Find semantically similar art descriptions"""
-        query_embedding = self.model.encode([query])
-        distances, indices = self.index.search(query_embedding, k)
-        
-        results = []
-        for idx in indices[0]:
-            cursor = self.conn.execute('''
-            SELECT s.sentence_text, a.image_file, a.title, a.author, a.type, a.school
-            FROM description_sentences s
-            JOIN artworks a ON s.artwork_id = a.image_file
-            WHERE s.id = ?
-            ''', (int(idx),))
-            result = cursor.fetchone()
-            if result:
-                results.append({
-                    'sentence': result[0],
-                    'image_file': result[1],
-                    'title': result[2],
-                    'author': result[3],
-                    'type': result[4],
-                    'school': result[5],
-                    'id': int(idx)
-                })
-        return results
-    
-    def hybrid_search(self, text_query, semantic_query, k=5):
-        """Combine text and semantic search"""
-        # Text search
-        cursor = self.conn.execute('''
-        SELECT s.id, s.sentence_text, a.image_file, a.title, a.author
-        FROM sentences_fts f
-        JOIN description_sentences s ON f.rowid = s.id
-        JOIN artworks a ON s.artwork_id = a.image_file
-        WHERE f.sentence_text MATCH ?
-        ORDER BY rank
-        LIMIT ?
-        ''', (text_query, k*2))
-        text_results = cursor.fetchall()
-        
-        # Semantic search
-        semantic_results = self.semantic_search(semantic_query, k*2)
-        
-        # Combine and deduplicate
-        combined = {(r['id'], r['sentence']) for r in semantic_results}
-        combined.update({(r[0], r[1]) for r in text_results})
-        
-        return list(combined)[:k]
 
 if __name__ == '__main__':
     create_databases()

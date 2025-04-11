@@ -1,4 +1,4 @@
-from init_databases import ArtSearch
+from retrieval import ArtSearch
 
 def main():
     print("Initializing art search...")
