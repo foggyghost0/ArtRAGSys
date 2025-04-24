@@ -168,6 +168,7 @@ def create_databases():
 
     # Create indexes
     print("Creating database indexes...")
+    
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_author ON artworks(author)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_timeframe ON artworks(timeframe_start, timeframe_end)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_school ON artworks(school)')
