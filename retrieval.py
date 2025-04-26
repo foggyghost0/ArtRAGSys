@@ -132,3 +132,5 @@ def main_search(text_query, semantic_query):
 
 if __name__ == '__main__':
     main_search("flower", "still life with flowers")
+    
+    #implement BM25 ranking? 
