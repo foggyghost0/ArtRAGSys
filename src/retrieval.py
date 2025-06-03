@@ -4,13 +4,16 @@ Provides semantic and hybrid search capabilities.
 """
 
 import sqlite3
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import re
+from collections import defaultdict
 
 import chromadb
 from sentence_transformers import SentenceTransformer
 
 import spacy
+
+from textblob import TextBlob
 
 
 class ArtSearch:
@@ -172,39 +175,61 @@ class ArtSearch:
         timeframe_end: Optional[int] = None,
         k: int = 10,
     ) -> List[Dict[str, Any]]:
-        """Search artworks by metadata criteria."""
+        """Search artworks by metadata criteria with relevance ranking."""
         try:
             conditions = []
             params = []
+            relevance_parts = []
 
+            # Build SQL conditions and relevance scoring
             if author:
                 conditions.append("a.author LIKE ?")
                 params.append(f"%{author}%")
+                # Add relevance boost for exact author matches
+                relevance_parts.append(
+                    f"CASE WHEN a.author LIKE '%{author}%' THEN 1.0 ELSE 0.0 END"
+                )
 
             if art_type:
                 conditions.append("a.type LIKE ?")
                 params.append(f"%{art_type}%")
+                relevance_parts.append(
+                    f"CASE WHEN a.type LIKE '%{art_type}%' THEN 1.0 ELSE 0.0 END"
+                )
 
             if school:
                 conditions.append("a.school LIKE ?")
                 params.append(f"%{school}%")
+                relevance_parts.append(
+                    f"CASE WHEN a.school LIKE '%{school}%' THEN 1.0 ELSE 0.0 END"
+                )
 
             if timeframe_start:
                 conditions.append("a.timeframe_start >= ?")
                 params.append(timeframe_start)
+                relevance_parts.append("0.5")  # Time match gets lower weight
 
             if timeframe_end:
                 conditions.append("a.timeframe_end <= ?")
                 params.append(timeframe_end)
+                relevance_parts.append("0.5")  # Time match gets lower weight
+
+            # Build relevance score calculation
+            if relevance_parts:
+                relevance_calc = " + ".join(relevance_parts)
+            else:
+                relevance_calc = "1.0"  # Default relevance if no specific criteria
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             params.append(k)
 
             query = f"""
             SELECT a.image_file, a.title, a.author, a.type, a.school, 
-                   a.date, a.timeframe_start, a.timeframe_end, a.full_description
+                   a.date, a.timeframe_start, a.timeframe_end, a.full_description,
+                   ({relevance_calc}) / {len(relevance_parts) if relevance_parts else 1} as relevance_score
             FROM artworks a
             WHERE {where_clause}
+            ORDER BY relevance_score DESC
             LIMIT ?
             """
 
@@ -224,6 +249,7 @@ class ArtSearch:
                         "timeframe_start": result[6],
                         "timeframe_end": result[7],
                         "description": result[8],
+                        "relevance_score": result[9],
                     }
                 )
 
@@ -231,6 +257,193 @@ class ArtSearch:
 
         except Exception as e:
             print(f"Error in metadata search: {e}")
+            return []
+
+    def _normalize_result_key(self, result: Dict[str, Any]) -> str:
+        """Generate a unique key for deduplication across different search methods."""
+        artwork_id = result.get("artwork_id", "")
+        sentence_order = result.get("sentence_order")
+
+        if sentence_order is not None:
+            return f"{artwork_id}#{sentence_order}"
+        else:
+            return artwork_id
+
+    def _normalize_result_format(
+        self, result: Dict[str, Any], search_type: str
+    ) -> Dict[str, Any]:
+        """Normalize result format across different search methods."""
+        normalized = {
+            "artwork_id": result.get("artwork_id", ""),
+            "title": result.get("title", ""),
+            "author": result.get("author", ""),
+            "type": result.get("type", ""),
+            "school": result.get("school", ""),
+            "search_type": search_type,
+            "content": "",
+            "relevance_score": 0.0,
+        }
+
+        # Extract content and relevance score based on search type
+        if search_type in ["semantic_sentences", "text"]:
+            normalized["content"] = result.get("sentence", "")
+            normalized["sentence_order"] = result.get("sentence_order")
+            normalized["relevance_score"] = result.get(
+                "similarity", result.get("score", 0.0)
+            )
+        elif search_type == "semantic_descriptions":
+            normalized["content"] = result.get("description", "")
+            normalized["relevance_score"] = result.get("similarity", 0.0)
+        elif search_type == "metadata":
+            normalized["content"] = result.get("description", "")
+            normalized["relevance_score"] = result.get("relevance_score", 1.0)
+        else:
+            # For hybrid or other types
+            normalized["content"] = result.get(
+                "sentence", result.get("description", "")
+            )
+            normalized["relevance_score"] = result.get(
+                "score", result.get("similarity", 0.0)
+            )
+            if "sentence_order" in result:
+                normalized["sentence_order"] = result["sentence_order"]
+
+        return normalized
+
+    def reciprocal_rank_fusion(
+        self, result_lists: List[Tuple[List[Dict[str, Any]], str]], k: int = 60
+    ) -> List[Dict[str, Any]]:
+        """
+        Apply Reciprocal Rank Fusion to combine multiple ranked result lists.
+
+        Args:
+            result_lists: List of (results, search_type) tuples
+            k: RRF parameter (typically 60)
+
+        Returns:
+            List of results ranked by RRF score
+        """
+        rrf_scores = defaultdict(float)
+        result_lookup = {}
+
+        for results, search_type in result_lists:
+            for rank, result in enumerate(results):
+                # Normalize the result format
+                normalized_result = self._normalize_result_format(result, search_type)
+                result_key = self._normalize_result_key(normalized_result)
+
+                # Calculate RRF contribution: 1 / (k + rank)
+                rrf_contribution = 1.0 / (k + rank + 1)  # +1 because rank is 0-indexed
+                rrf_scores[result_key] += rrf_contribution
+
+                # Store the result (prefer sentence-level over artwork-level)
+                if (
+                    result_key not in result_lookup
+                    or "sentence_order" in normalized_result
+                ):
+                    result_lookup[result_key] = normalized_result
+
+        # Add RRF scores to results and sort
+        final_results = []
+        for result_key, rrf_score in rrf_scores.items():
+            result = result_lookup[result_key]
+            result["rrf_score"] = rrf_score
+            final_results.append(result)
+
+        # Sort by RRF score (descending)
+        final_results.sort(key=lambda x: x["rrf_score"], reverse=True)
+
+        return final_results
+
+    def comprehensive_search(
+        self,
+        query: str,
+        k: int = 10,
+        use_semantic_sentences: bool = True,
+        use_semantic_descriptions: bool = True,
+        use_text_search: bool = True,
+        use_metadata_search: bool = True,
+        metadata_params: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform comprehensive search using RRF to combine all available search methods.
+
+        Args:
+            query: Search query
+            k: Number of final results to return
+            use_semantic_sentences: Whether to include semantic sentence search
+            use_semantic_descriptions: Whether to include semantic description search
+            use_text_search: Whether to include full-text search
+            use_metadata_search: Whether to include metadata search
+            metadata_params: Additional metadata search parameters
+
+        Returns:
+            List of results ranked by RRF score
+        """
+        try:
+            result_lists = []
+            search_k = k * 3  # Get more results from each method for better fusion
+
+            # Semantic sentence search
+            if use_semantic_sentences:
+                semantic_sent_results = self.semantic_search_sentences(query, search_k)
+                if semantic_sent_results:
+                    result_lists.append((semantic_sent_results, "semantic_sentences"))
+
+            # Semantic description search
+            if use_semantic_descriptions:
+                semantic_desc_results = self.semantic_search_descriptions(
+                    query, search_k
+                )
+                if semantic_desc_results:
+                    result_lists.append(
+                        (semantic_desc_results, "semantic_descriptions")
+                    )
+
+            # Text search
+            if use_text_search:
+                text_results = self.text_search(query, search_k)
+                if text_results:
+                    result_lists.append((text_results, "text"))
+
+            # Metadata search (if parameters provided or can be extracted from query)
+            if use_metadata_search:
+                # Use provided metadata params or try to extract from query
+                if metadata_params:
+                    meta_results = self.metadata_search(k=search_k, **metadata_params)
+                else:
+                    # Try to extract metadata from query using preprocess_query
+                    query_analysis = preprocess_query(query)
+                    if query_analysis["metadata_fields"]:
+                        meta_results = self.metadata_search(
+                            k=search_k, **query_analysis["metadata_fields"]
+                        )
+                    else:
+                        meta_results = []
+
+                if meta_results:
+                    result_lists.append((meta_results, "metadata"))
+
+            # Apply RRF if we have multiple result lists
+            if len(result_lists) > 1:
+                fused_results = self.reciprocal_rank_fusion(result_lists)
+                return fused_results[:k]
+            elif len(result_lists) == 1:
+                # Only one search method used, just format and return
+                results, search_type = result_lists[0]
+                normalized_results = [
+                    self._normalize_result_format(result, search_type)
+                    for result in results[:k]
+                ]
+                # Add RRF score as the original relevance score
+                for result in normalized_results:
+                    result["rrf_score"] = result["relevance_score"]
+                return normalized_results
+            else:
+                return []
+
+        except Exception as e:
+            print(f"Error in comprehensive search: {e}")
             return []
 
     def hybrid_search(
@@ -352,6 +565,54 @@ def demo_search(query: str = "royal portrait painting"):
     search.close()
 
 
+def demo_comprehensive_search(query: str = "royal portrait painting"):
+    """Demonstrate comprehensive search with RRF fusion."""
+    print(f"Comprehensive RRF Search Demo for: '{query}'")
+    print("=" * 60)
+
+    # Initialize search system
+    search = ArtSearch()
+
+    # Run comprehensive search
+    print("\nComprehensive Search with RRF:")
+    print("-" * 40)
+    comprehensive_results = search.comprehensive_search(query, k=5)
+
+    for i, result in enumerate(comprehensive_results, 1):
+        print(
+            f"{i}. [RRF: {result['rrf_score']:.4f}] {result['title']} by {result['author']}"
+        )
+        print(f"   Search Type: {result['search_type']}")
+        print(f"   Content: {result['content'][:100]}...")
+        if "sentence_order" in result:
+            print(f"   Sentence #{result['sentence_order']}")
+        print()
+
+    # Compare with individual methods
+    print("\nComparison with Individual Methods:")
+    print("-" * 40)
+
+    # Semantic sentence search
+    print("\nSemantic Sentences (top 3):")
+    semantic_results = search.semantic_search_sentences(query, k=3)
+    for i, result in enumerate(semantic_results, 1):
+        print(f"  {i}. [{result['similarity']:.3f}] {result['title']}")
+
+    # Text search
+    print("\nText Search (top 3):")
+    text_results = search.text_search(query, k=3)
+    for i, result in enumerate(text_results, 1):
+        print(f"  {i}. {result['title']}")
+
+    # Metadata search for portraits
+    print("\nMetadata Search - portraits (top 3):")
+    metadata_results = search.metadata_search(art_type="portrait", k=3)
+    for i, result in enumerate(metadata_results, 1):
+        print(f"  {i}. [{result['relevance_score']:.3f}] {result['title']}")
+
+    search.close()
+
+
 def preprocess_query(query: str) -> dict:
     """
     Analyze the query using spaCy transformer model and heuristics.
@@ -368,7 +629,9 @@ def preprocess_query(query: str) -> dict:
             "metadata_fields": dict  # e.g. {"author": "Rembrandt", "type": "portrait"}
         }
     """
-    query = query.strip()
+
+    # Correct typos in the query using TextBlob
+    query = str(TextBlob(query.strip()).correct())
     nlp = spacy.load("en_core_web_trf")
     doc = nlp(query)
 
@@ -491,3 +754,23 @@ def preprocess_query(query: str) -> dict:
         "hybrid_snippet": hybrid_snippet,
         "metadata_fields": metadata_fields,
     }
+
+
+if __name__ == "__main__":
+    # Test the new comprehensive search functionality
+    print("Testing Art Search System with RRF")
+    print("=" * 50)
+
+    # Test queries
+    test_queries = [
+        "royal portrait painting",
+        "landscape with trees",
+        "Dutch still life",
+        "religious painting by Italian artist",
+    ]
+
+    for query in test_queries:
+        print(f"\n\nTesting query: '{query}'")
+        print("-" * 50)
+        demo_comprehensive_search(query)
+        print("\n" + "=" * 50)
