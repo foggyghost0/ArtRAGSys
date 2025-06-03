@@ -5,9 +5,12 @@ Provides semantic and hybrid search capabilities.
 
 import sqlite3
 from typing import List, Dict, Any, Optional
+import re
 
 import chromadb
 from sentence_transformers import SentenceTransformer
+
+import spacy
 
 
 class ArtSearch:
@@ -349,5 +352,142 @@ def demo_search(query: str = "royal portrait painting"):
     search.close()
 
 
-if __name__ == "__main__":
-    demo_search("royal portrait painting")
+def preprocess_query(query: str) -> dict:
+    """
+    Analyze the query using spaCy transformer model and heuristics.
+    Decide which search types to perform and extract relevant snippets.
+    Returns:
+        {
+            "semantic": bool,
+            "text": bool,
+            "hybrid": bool,
+            "metadata": bool,
+            "semantic_snippet": str,
+            "text_snippet": str,
+            "hybrid_snippet": str,
+            "metadata_fields": dict  # e.g. {"author": "Rembrandt", "type": "portrait"}
+        }
+    """
+    query = query.strip()
+    nlp = spacy.load("en_core_web_trf")
+    doc = nlp(query)
+
+    # Metadata fields to extract
+    metadata_fields = {}
+
+    # Heuristic keyword lists for art metadata
+    type_keywords = [
+        "genre",
+        "historical",
+        "interior",
+        "landscape",
+        "mythological",
+        "other",
+        "portrait",
+        "religious",
+        "still-life",
+        "study",
+    ]
+    school_keywords = [
+        "American",
+        "Austrian",
+        "Belgian",
+        "Bohemian",
+        "Catalan",
+        "Danish",
+        "Dutch",
+        "English",
+        "Flemish",
+        "French",
+        "German",
+        "Greek",
+        "Hungarian",
+        "Irish",
+        "Italian",
+        "Netherlandish",
+        "Norwegian",
+        "Other",
+        "Polish",
+        "Portuguese",
+        "Russian",
+        "Scottish",
+        "Spanish",
+        "Swedish",
+        "Swiss",
+    ]
+    # Lowercase for matching
+    type_keywords_lc = [kw.lower() for kw in type_keywords]
+    school_keywords_lc = [kw.lower() for kw in school_keywords]
+
+    # 1. Named Entity Recognition for author, date, school
+    for ent in doc.ents:
+        if ent.label_ == "PERSON":
+            metadata_fields["author"] = ent.text
+        elif ent.label_ == "DATE":
+            # Try to extract years or centuries
+            year_match = re.search(r"\b(1[5-9]\d{2}|20\d{2})\b", ent.text)
+            century_match = re.search(
+                r"\b(\d{1,2})(st|nd|rd|th)? century\b", ent.text.lower()
+            )
+            if year_match:
+                year = int(year_match.group(1))
+                # Heuristic: treat as either start or end
+                if "start" not in metadata_fields:
+                    metadata_fields["timeframe_start"] = year
+                else:
+                    metadata_fields["timeframe_end"] = year
+            elif century_match:
+                century = int(century_match.group(1))
+                # Approximate century to years
+                start = (century - 1) * 100 + 1
+                end = century * 100
+                metadata_fields["timeframe_start"] = start
+                metadata_fields["timeframe_end"] = end
+        elif ent.label_ == "ORG":
+            # Possible school
+            metadata_fields["school"] = ent.text
+
+    # 2. Keyword matching for type and school
+    for token in doc:
+        token_lc = token.text.lower()
+        if token_lc in type_keywords_lc:
+            metadata_fields["type"] = token.text
+        if token_lc in school_keywords_lc:
+            metadata_fields["school"] = token.text
+
+    # 3. Decide which searches to perform
+    has_metadata = bool(metadata_fields)
+    # If query contains both metadata and non-metadata (descriptive) terms, do hybrid
+    non_metadata_tokens = [
+        token.text
+        for token in doc
+        if not token.is_stop
+        and token.pos_ in {"NOUN", "ADJ", "VERB"}
+        and token.text.lower() not in type_keywords_lc + school_keywords_lc
+    ]
+    # If query is only metadata, prefer metadata search
+    only_metadata = len(non_metadata_tokens) == 0 and has_metadata
+
+    # Always do metadata search if any metadata field found
+    do_metadata = has_metadata
+    # Do hybrid if both metadata and descriptive tokens
+    do_hybrid = has_metadata and len(non_metadata_tokens) > 0
+    # Do semantic/text if query is descriptive or hybrid
+    do_semantic = not only_metadata or do_hybrid
+    do_text = do_semantic  # For now, treat text and semantic similarly
+
+    # Extract snippets
+    semantic_snippet = " ".join(non_metadata_tokens) if non_metadata_tokens else query
+    text_snippet = semantic_snippet
+    hybrid_snippet = query
+
+    return {
+        "semantic": do_semantic,
+        "text": do_text,
+        "hybrid": do_hybrid,
+        "metadata": do_metadata,
+        "semantic_snippet": semantic_snippet,
+        "text_snippet": text_snippet,
+        "hybrid_snippet": hybrid_snippet,
+        "metadata_fields": metadata_fields,
+    }
