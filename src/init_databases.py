@@ -11,7 +11,7 @@ from typing import Tuple, Optional
 import chromadb
 from sentence_transformers import SentenceTransformer
 from nltk.tokenize import sent_tokenize
-
+import nltk
 
 def safe_split(
     value: str,
@@ -406,8 +406,6 @@ def create_databases(
 
 if __name__ == "__main__":
     # Download required NLTK data
-    import nltk
-
     print("Downloading NLTK data...")
     nltk.download("punkt", quiet=True)
 

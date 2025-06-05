@@ -173,7 +173,3 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# Ignore all images in data/img
-data/img/
-
-data/sentences_for_evaluation.csv

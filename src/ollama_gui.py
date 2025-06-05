@@ -1,6 +1,6 @@
 """
-Simplified Ollama integration module for GUI usage.
-Provides essential RAG capabilities for the ArtRAG System GUI.
+Ollama integration module for GUI usage.
+Provides RAG capabilities for the ArtRAG System GUI.
 """
 
 import requests
@@ -31,8 +31,8 @@ class SearchResult:
 
 class OllamaArtRAGGUI:
     """
-    Simplified Ollama Art RAG system for GUI usage.
-    Focuses on essential functionality needed for the interface.
+    Ollama Art RAG system for GUI usage.
+    Focuses on functionality needed for the interface.
     """
 
     def __init__(
@@ -81,7 +81,7 @@ class OllamaArtRAGGUI:
         Args:
             query: Search query
             k: Number of results to return
-            search_type: Type of search ('comprehensive', 'semantic', 'text', 'metadata')
+            search_type: Type of search ('comprehensive', 'semantic', 'text', 'metadata', 'fuzzy', 'hybrid_scoring')
             include_images: Whether to include image paths
 
         Returns:
@@ -94,14 +94,15 @@ class OllamaArtRAGGUI:
                     query, search_type="comprehensive", k=k
                 )
             elif search_type == "semantic":
-                results = self.art_search.comprehensive_search(
-                    query, search_type="semantic", k=k
-                )
+                results = self.art_search.semantic_retrieval(query, k=k)
             elif search_type == "text":
-                # Map to keyword search in the new system
-                results = self.art_search.comprehensive_search(
-                    query, search_type="keyword", k=k
-                )
+                results = self.art_search.keyword_retrieval(query, k=k)
+            elif search_type == "fuzzy":
+                results = self.art_search.fuzzy_keyword_retrieval(query, k=k)
+            elif search_type == "hybrid_scoring":
+                results = self.art_search.hybrid_scoring_retrieval(query, k=k)
+            elif search_type == "hybrid":
+                results = self.art_search.hybrid_retrieval(query, k=k)
             elif search_type == "metadata":
                 # Use comprehensive search which includes metadata extraction
                 results = self.art_search.comprehensive_search(
@@ -129,7 +130,9 @@ class OllamaArtRAGGUI:
                     author=result.get("author", ""),
                     content=result.get("description", ""),
                     search_type=search_type,
-                    relevance_score=result.get("relevance_score", 0.0),
+                    relevance_score=result.get(
+                        "hybrid_score", result.get("relevance_score", 0.0)
+                    ),
                     image_path=image_path,
                 )
                 search_results.append(search_result)
@@ -189,7 +192,10 @@ Context from Art Database:
 
 User Question: {query}
 
-Please provide a detailed, informative response based on the retrieved artwork information. Include specific details about the artworks, artists, and relevant art historical context when available."""
+Please provide a detailed, informative response based on the retrieved artwork information. Include specific details about the artworks, artists, and relevant art historical context when available.
+DO NOT include any information that is not present in the provided context.
+Please ensure your response is clear, concise, and relevant to the user's query.
+"""
 
             # Generate response with Ollama
             response = requests.post(
@@ -197,10 +203,10 @@ Please provide a detailed, informative response based on the retrieved artwork i
                 json={
                     "model": self.model_name,
                     "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": temperature, "top_p": 0.9, "top_k": 40},
+                    "stream": True,
+                    "options": {"temperature": temperature, "top_p": 0.9, "top_k": 30},
                 },
-                timeout=120,
+                timeout=250,
             )
             response.raise_for_status()
 

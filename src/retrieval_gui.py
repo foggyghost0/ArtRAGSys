@@ -5,14 +5,14 @@ Provides semantic and hybrid search capabilities for GUI applications.
 
 import sqlite3
 import threading
-from typing import List, Dict, Any, Optional, Tuple
-import re
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
 
 import chromadb
 from sentence_transformers import SentenceTransformer
 import spacy
 from textblob import TextBlob
+from rapidfuzz import fuzz
 
 
 class ThreadSafeArtSearch:
@@ -55,7 +55,7 @@ class ThreadSafeArtSearch:
 
             print("Loaded ChromaDB collections:")
             print(f"- Sentences: {self.sentence_collection.count()} items")
-            print(f"- Descriptions: {self.description_collection.count()} items")
+            print(f"- Full Descriptions: {self.description_collection.count()} items")
 
         except Exception as e:
             print(f"Error connecting to ChromaDB: {e}")
@@ -509,3 +509,114 @@ class ThreadSafeArtSearch:
         """Close database connections."""
         if hasattr(self._thread_local, "conn"):
             self._thread_local.conn.close()
+
+    def semantic_retrieval(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+        """Semantic retrieval using ChromaDB embeddings."""
+        return self.semantic_search_sentences(query, k)
+
+    def keyword_retrieval(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+        """Keyword-based retrieval using SQL LIKE."""
+        return self._keyword_only_search(query, k)
+
+    def fuzzy_keyword_retrieval(
+        self, query: str, k: int = 5, threshold: int = 70
+    ) -> List[Dict[str, Any]]:
+        """Fuzzy keyword-based retrieval using rapidfuzz for approximate matches."""
+        try:
+            conn = self._get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT image_file, author, title, medium, dimensions, date, type, school, 
+                       timeframe_start, timeframe_end, full_description
+                FROM artworks
+                """
+            )
+            all_rows = cursor.fetchall()
+            scored_results = []
+            for row in all_rows:
+                fields = [
+                    str(row[1] or ""),
+                    str(row[2] or ""),
+                    str(row[10] or ""),
+                    str(row[6] or ""),
+                    str(row[7] or ""),
+                    str(row[3] or ""),
+                ]
+                max_score = max(
+                    [
+                        fuzz.partial_ratio(query.lower(), field.lower())
+                        for field in fields
+                        if field
+                    ]
+                )
+                if max_score >= threshold:
+                    scored_results.append((max_score, row))
+            # Sort by fuzzy score descending
+            scored_results.sort(key=lambda x: x[0], reverse=True)
+            results = []
+            for score, row in scored_results[:k]:
+                artwork = {
+                    "id": row[0],
+                    "image_file": row[0],
+                    "author": row[1],
+                    "title": row[2],
+                    "medium": row[3],
+                    "dimensions": row[4],
+                    "date": row[5],
+                    "type": row[6],
+                    "school": row[7],
+                    "timeframe_start": row[8],
+                    "timeframe_end": row[9],
+                    "description": row[10],
+                    "technique": row[3],
+                    "timeframe": f"{row[8]}-{row[9]}" if row[8] and row[9] else row[5],
+                    "relevance_score": score / 100.0,
+                }
+                results.append(artwork)
+            return results
+        except Exception as e:
+            print(f"Error in fuzzy keyword search: {e}")
+            return []
+
+    def hybrid_scoring_retrieval(
+        self,
+        query: str,
+        k: int = 12,
+        fuzzy_weight: float = 0.4,
+        semantic_weight: float = 0.6,
+    ) -> List[Dict[str, Any]]:
+        """Hybrid scoring retrieval: combine semantic and fuzzy keyword scores."""
+        semantic_results = self.semantic_retrieval(query, k * 2)
+        fuzzy_results = self.fuzzy_keyword_retrieval(query, k * 2)
+        # Index by artwork id
+        combined = {}
+        for art in semantic_results:
+            combined[art["id"]] = {
+                "semantic": art.get("relevance_score", 0.0),
+                "fuzzy": 0.0,
+                "artwork": art,
+            }
+        for art in fuzzy_results:
+            if art["id"] in combined:
+                combined[art["id"]]["fuzzy"] = art.get("relevance_score", 0.0)
+            else:
+                combined[art["id"]] = {
+                    "semantic": 0.0,
+                    "fuzzy": art.get("relevance_score", 0.0),
+                    "artwork": art,
+                }
+        # Compute hybrid score
+        scored = []
+        for entry in combined.values():
+            hybrid_score = (
+                semantic_weight * entry["semantic"] + fuzzy_weight * entry["fuzzy"]
+            )
+            entry["artwork"]["hybrid_score"] = hybrid_score
+            scored.append(entry["artwork"])
+        scored.sort(key=lambda x: x["hybrid_score"], reverse=True)
+        return scored[:k]
+
+    def hybrid_retrieval(self, query: str, k: int = 12) -> List[Dict[str, Any]]:
+        """Legacy hybrid retrieval: combine semantic and keyword results (deduplication only)."""
+        return self._hybrid_search(query, k)

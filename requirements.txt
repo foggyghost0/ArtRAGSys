@@ -1,0 +1,23 @@
+# ArtRAGSys requirements.txt
+
+# Data and NLP
+pandas
+chromadb
+sentence-transformers
+spacy
+textblob
+rapidfuzz
+nltk
+
+# HTTP
+requests
+
+# GUI
+customtkinter
+Pillow
+
+# LLM
+ollama
+
+# For NLTK, you need to run: python -m nltk.downloader punkt
+# For spaCy, install the transformer model: python -m spacy download en_core_web_trf

@@ -1,6 +1,5 @@
 """
 GUI module for ArtRAG System using CustomTkinter.
-Provides a sleek interface for searching and chatting about artworks.
 """
 
 import customtkinter as ctk
@@ -71,41 +70,55 @@ class ArtRAGModernGUI:
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(4, weight=1)  # Empty space
 
-        # Sidebar title
+        # Sidebar title with icon
         self.logo_label = ctk.CTkLabel(
-            self.sidebar, text="ArtRAG", font=ctk.CTkFont(size=24, weight="bold")
+            self.sidebar, text="🎨 ArtRAG", font=ctk.CTkFont(size=26, weight="bold")
         )
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(24, 12))
 
-        # Navigation buttons
+        # Navigation buttons with highlight logic
+        self.active_nav_btn = None
+
+        def highlight_nav(btn):
+            if self.active_nav_btn:
+                self.active_nav_btn.configure(fg_color=None)
+            btn.configure(fg_color=("#1a1a1a", "#333333"))
+            self.active_nav_btn = btn
+
         self.welcome_btn = ctk.CTkButton(
             self.sidebar,
             text="🏠 Search",
-            command=self.show_welcome_page,
-            height=40,
-            font=ctk.CTkFont(size=14),
+            command=lambda: [highlight_nav(self.welcome_btn), self.show_welcome_page()],
+            height=44,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            corner_radius=12,
+            hover_color="#2B5CE6",
         )
-        self.welcome_btn.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
+        self.welcome_btn.grid(row=1, column=0, padx=18, pady=8, sticky="ew")
 
         self.results_btn = ctk.CTkButton(
             self.sidebar,
             text="📋 Results",
-            command=self.show_results_page,
-            height=40,
-            font=ctk.CTkFont(size=14),
+            command=lambda: [highlight_nav(self.results_btn), self.show_results_page()],
+            height=44,
+            font=ctk.CTkFont(size=15, weight="bold"),
             state="disabled",
+            corner_radius=12,
+            hover_color="#2B5CE6",
         )
-        self.results_btn.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
+        self.results_btn.grid(row=2, column=0, padx=18, pady=8, sticky="ew")
 
         self.chat_btn = ctk.CTkButton(
             self.sidebar,
             text="💬 Chat",
-            command=self.show_chat_page,
-            height=40,
-            font=ctk.CTkFont(size=14),
+            command=lambda: [highlight_nav(self.chat_btn), self.show_chat_page()],
+            height=44,
+            font=ctk.CTkFont(size=15, weight="bold"),
             state="disabled",
+            corner_radius=12,
+            hover_color="#2B5CE6",
         )
-        self.chat_btn.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
+        self.chat_btn.grid(row=3, column=0, padx=18, pady=8, sticky="ew")
 
         # Appearance mode switch
         self.appearance_mode_label = ctk.CTkLabel(
@@ -120,9 +133,13 @@ class ArtRAGModernGUI:
         )
         self.appearance_mode_optionemenu.grid(row=6, column=0, padx=20, pady=(10, 20))
 
-        # Main content frame
-        self.main_frame = ctk.CTkFrame(self.root, corner_radius=0)
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        # Vertical separator between sidebar and main content
+        self.separator = ctk.CTkFrame(self.root, width=2, fg_color="#222222")
+        self.separator.grid(row=0, column=1, sticky="ns")
+
+        # Main content frame with neutral background
+        self.main_frame = ctk.CTkFrame(self.root, corner_radius=0, fg_color="#23272e")
+        self.main_frame.grid(row=0, column=2, sticky="nsew", padx=(0, 0))
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(0, weight=1)
 
@@ -140,78 +157,89 @@ class ArtRAGModernGUI:
         self.clear_main_frame()
 
         # Welcome container
-        welcome_container = ctk.CTkFrame(self.main_frame)
-        welcome_container.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+        welcome_container = ctk.CTkFrame(self.main_frame, fg_color="#23272e")
+        welcome_container.grid(row=0, column=0, sticky="nsew", padx=32, pady=32)
         welcome_container.grid_columnconfigure(0, weight=1)
 
         # Title
         title_label = ctk.CTkLabel(
             welcome_container,
             text="ArtRAG - Art Search & Chat System",
-            font=ctk.CTkFont(size=32, weight="bold"),
+            font=ctk.CTkFont(size=36, weight="bold"),
         )
-        title_label.grid(row=0, column=0, pady=(40, 20))
+        title_label.grid(row=0, column=0, pady=(48, 24))
 
         # Subtitle
         subtitle_label = ctk.CTkLabel(
             welcome_container,
             text="Search through art collections and chat with AI about artworks",
-            font=ctk.CTkFont(size=16),
+            font=ctk.CTkFont(size=18),
         )
-        subtitle_label.grid(row=1, column=0, pady=(0, 40))
+        subtitle_label.grid(row=1, column=0, pady=(0, 48))
 
         # Search section
-        search_frame = ctk.CTkFrame(welcome_container)
-        search_frame.grid(row=2, column=0, sticky="ew", padx=40, pady=20)
+        search_frame = ctk.CTkFrame(welcome_container, corner_radius=16)
+        search_frame.grid(row=2, column=0, sticky="ew", padx=48, pady=24)
         search_frame.grid_columnconfigure(0, weight=1)
 
         search_label = ctk.CTkLabel(
             search_frame,
             text="Search for artworks:",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=ctk.CTkFont(size=20, weight="bold"),
         )
-        search_label.grid(row=0, column=0, pady=(20, 10))
+        search_label.grid(row=0, column=0, pady=(24, 12))
 
         # Search input
         self.search_entry = ctk.CTkEntry(
             search_frame,
             placeholder_text="Enter your search query (e.g., 'Renaissance paintings', 'Van Gogh', 'still life')",
-            height=40,
-            font=ctk.CTkFont(size=14),
+            height=44,
+            font=ctk.CTkFont(size=15),
+            corner_radius=10,
         )
-        self.search_entry.grid(row=1, column=0, sticky="ew", padx=20, pady=10)
+        self.search_entry.grid(row=1, column=0, sticky="ew", padx=24, pady=12)
         self.search_entry.bind("<Return>", lambda event: self.perform_search())
 
         # Search type selection
-        search_type_frame = ctk.CTkFrame(search_frame)
-        search_type_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=10)
+        search_type_frame = ctk.CTkFrame(search_frame, fg_color="#23272e")
+        search_type_frame.grid(row=2, column=0, sticky="ew", padx=24, pady=12)
 
         search_type_label = ctk.CTkLabel(search_type_frame, text="Search Type:")
-        search_type_label.grid(row=0, column=0, padx=10, pady=10)
+        search_type_label.grid(row=0, column=0, padx=12, pady=12)
 
         self.search_type_var = ctk.StringVar(value="comprehensive")
         search_type_menu = ctk.CTkOptionMenu(
             search_type_frame,
             variable=self.search_type_var,
-            values=["comprehensive", "semantic", "text", "metadata"],
+            values=[
+                "comprehensive",
+                "semantic",
+                "text",
+                "fuzzy",
+                "hybrid",
+                "hybrid_scoring",
+                "metadata",
+            ],
         )
-        search_type_menu.grid(row=0, column=1, padx=10, pady=10)
+        search_type_menu.grid(row=0, column=1, padx=12, pady=12)
 
         # Search button
         search_button = ctk.CTkButton(
             search_frame,
-            text="🔍 Search",
+            text="Search",
             command=self.perform_search,
-            height=40,
-            font=ctk.CTkFont(size=16, weight="bold"),
+            height=44,
+            font=ctk.CTkFont(size=17, weight="bold"),
+            corner_radius=10,
+            hover_color="#2B5CE6",
         )
-        search_button.grid(row=3, column=0, pady=(10, 20))
+        search_button.grid(row=3, column=0, pady=(12, 24))
 
         # Status label
         self.status_label = ctk.CTkLabel(
-            welcome_container, text="Ready to search...", font=ctk.CTkFont(size=12)
+            welcome_container, text="Ready to search...", font=ctk.CTkFont(size=13)
         )
-        self.status_label.grid(row=3, column=0, pady=20)
+        self.status_label.grid(row=3, column=0, pady=24)
 
     def perform_search(self):
         """Perform the search operation."""
@@ -264,26 +292,32 @@ class ArtRAGModernGUI:
         self.clear_main_frame()
 
         # Results container with scrollable frame
-        results_container = ctk.CTkScrollableFrame(self.main_frame)
-        results_container.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+        results_container = ctk.CTkScrollableFrame(self.main_frame, fg_color="#23272e")
+        results_container.grid(row=0, column=0, sticky="nsew", padx=32, pady=32)
         results_container.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
         # Title
         title_label = ctk.CTkLabel(
             results_container,
             text=f"Search Results ({len(self.search_results)} found)",
-            font=ctk.CTkFont(size=24, weight="bold"),
+            font=ctk.CTkFont(size=26, weight="bold"),
         )
-        title_label.grid(row=0, column=0, columnspan=4, pady=(0, 20))
+        title_label.grid(row=0, column=0, columnspan=4, pady=(0, 24))
 
         # Display results in a grid (4 columns)
         for i, result in enumerate(self.search_results):
             row = (i // 4) + 1
             col = i % 4
 
-            # Create result card
-            result_card = ctk.CTkFrame(results_container)
-            result_card.grid(row=row, column=col, padx=10, pady=10, sticky="nsew")
+            # Create result card with shadow effect
+            result_card = ctk.CTkFrame(
+                results_container,
+                corner_radius=14,
+                fg_color="#252a32",
+                border_width=2,
+                border_color="#2B5CE6",
+            )
+            result_card.grid(row=row, column=col, padx=14, pady=14, sticky="nsew")
 
             # Load and display image if available
             if result.image_path and os.path.exists(result.image_path):
@@ -294,13 +328,15 @@ class ArtRAGModernGUI:
                         light_image=image, dark_image=image, size=(200, 200)
                     )
 
-                    image_label = ctk.CTkLabel(result_card, image=photo, text="")
+                    image_label = ctk.CTkLabel(
+                        result_card, image=photo, text="", corner_radius=10
+                    )
                     image_label.grid(row=0, column=0, padx=10, pady=10)
                 except Exception as e:
                     logger.error(f"Error loading image {result.image_path}: {e}")
                     placeholder_label = ctk.CTkLabel(
                         result_card,
-                        text="🖼️\nNo Image",
+                        text="\nNo Image",
                         width=200,
                         height=200,
                         font=ctk.CTkFont(size=16),
@@ -309,7 +345,7 @@ class ArtRAGModernGUI:
             else:
                 placeholder_label = ctk.CTkLabel(
                     result_card,
-                    text="🖼️\nNo Image",
+                    text="\nNo Image",
                     width=200,
                     height=200,
                     font=ctk.CTkFont(size=16),
@@ -317,7 +353,7 @@ class ArtRAGModernGUI:
                 placeholder_label.grid(row=0, column=0, padx=10, pady=10)
 
             # Artwork info
-            info_frame = ctk.CTkFrame(result_card)
+            info_frame = ctk.CTkFrame(result_card, fg_color="#23272e")
             info_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
 
             title_text = (
@@ -326,7 +362,7 @@ class ArtRAGModernGUI:
             title_label = ctk.CTkLabel(
                 info_frame,
                 text=title_text,
-                font=ctk.CTkFont(size=14, weight="bold"),
+                font=ctk.CTkFont(size=15, weight="bold"),
                 wraplength=180,
             )
             title_label.grid(row=0, column=0, padx=5, pady=5)
@@ -337,7 +373,7 @@ class ArtRAGModernGUI:
             author_label = ctk.CTkLabel(
                 info_frame,
                 text=f"by {author_text}",
-                font=ctk.CTkFont(size=12),
+                font=ctk.CTkFont(size=13),
                 wraplength=180,
             )
             author_label.grid(row=1, column=0, padx=5, pady=(0, 5))
@@ -346,7 +382,7 @@ class ArtRAGModernGUI:
             score_label = ctk.CTkLabel(
                 info_frame,
                 text=f"Score: {result.relevance_score:.3f}",
-                font=ctk.CTkFont(size=10),
+                font=ctk.CTkFont(size=11),
             )
             score_label.grid(row=2, column=0, padx=5, pady=(0, 5))
 
@@ -355,8 +391,10 @@ class ArtRAGModernGUI:
                 result_card,
                 text="💬 Chat",
                 command=lambda r=result: self.start_chat_with_artwork(r),
-                height=30,
-                font=ctk.CTkFont(size=12),
+                height=34,
+                font=ctk.CTkFont(size=13),
+                corner_radius=8,
+                hover_color="#2B5CE6",
             )
             chat_button.grid(row=2, column=0, padx=10, pady=(0, 10))
 
@@ -378,14 +416,14 @@ class ArtRAGModernGUI:
         self.clear_main_frame()
 
         # Chat container
-        chat_container = ctk.CTkFrame(self.main_frame)
-        chat_container.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+        chat_container = ctk.CTkFrame(self.main_frame, fg_color="#23272e")
+        chat_container.grid(row=0, column=0, sticky="nsew", padx=32, pady=32)
         chat_container.grid_columnconfigure(1, weight=1)
         chat_container.grid_rowconfigure(1, weight=1)
 
         # Left panel - Artwork info
-        artwork_panel = ctk.CTkFrame(chat_container, width=300)
-        artwork_panel.grid(row=0, column=0, rowspan=3, sticky="nsew", padx=(0, 10))
+        artwork_panel = ctk.CTkFrame(chat_container, width=300, fg_color="#252a32")
+        artwork_panel.grid(row=0, column=0, rowspan=3, sticky="nsew", padx=(0, 14))
         artwork_panel.grid_propagate(False)
 
         # Artwork image
@@ -399,13 +437,15 @@ class ArtRAGModernGUI:
                     light_image=image, dark_image=image, size=(280, 280)
                 )
 
-                image_label = ctk.CTkLabel(artwork_panel, image=photo, text="")
+                image_label = ctk.CTkLabel(
+                    artwork_panel, image=photo, text="", corner_radius=10
+                )
                 image_label.grid(row=0, column=0, padx=10, pady=10)
             except Exception as e:
                 logger.error(f"Error loading image: {e}")
                 placeholder_label = ctk.CTkLabel(
                     artwork_panel,
-                    text="🖼️\nNo Image Available",
+                    text="\nNo Image Available",
                     width=280,
                     height=280,
                     font=ctk.CTkFont(size=16),
@@ -414,7 +454,7 @@ class ArtRAGModernGUI:
         else:
             placeholder_label = ctk.CTkLabel(
                 artwork_panel,
-                text="🖼️\nNo Image Available",
+                text="\nNo Image Available",
                 width=280,
                 height=280,
                 font=ctk.CTkFont(size=16),
@@ -422,23 +462,17 @@ class ArtRAGModernGUI:
             placeholder_label.grid(row=0, column=0, padx=10, pady=10)
 
         # Artwork details
-        details_frame = ctk.CTkScrollableFrame(artwork_panel, height=200)
+        details_frame = ctk.CTkScrollableFrame(
+            artwork_panel, height=200, fg_color="#23272e"
+        )
         details_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
 
-        details_text = f"""Title: {self.current_artwork.title}
-
-Artist: {self.current_artwork.author}
-
-Content: {self.current_artwork.content}
-
-Relevance Score: {self.current_artwork.relevance_score:.3f}
-
-Search Type: {self.current_artwork.search_type}"""
+        details_text = f"""Title: {self.current_artwork.title}\n\nArtist: {self.current_artwork.author}\n\nContent: {self.current_artwork.content}\n\nRelevance Score: {self.current_artwork.relevance_score:.3f}\n\nSearch Type: {self.current_artwork.search_type}"""
 
         details_label = ctk.CTkLabel(
             details_frame,
             text=details_text,
-            font=ctk.CTkFont(size=12),
+            font=ctk.CTkFont(size=13),
             justify="left",
             wraplength=260,
         )
@@ -448,26 +482,27 @@ Search Type: {self.current_artwork.search_type}"""
         chat_title = ctk.CTkLabel(
             chat_container,
             text=f"Chat about: {self.current_artwork.title[:40]}...",
-            font=ctk.CTkFont(size=20, weight="bold"),
+            font=ctk.CTkFont(size=22, weight="bold"),
         )
-        chat_title.grid(row=0, column=1, pady=(0, 10), sticky="ew")
+        chat_title.grid(row=0, column=1, pady=(0, 14), sticky="ew")
 
         # Chat history
-        self.chat_display = ctk.CTkScrollableFrame(chat_container)
-        self.chat_display.grid(row=1, column=1, sticky="nsew", pady=(0, 10))
+        self.chat_display = ctk.CTkScrollableFrame(chat_container, fg_color="#23272e")
+        self.chat_display.grid(row=1, column=1, sticky="nsew", pady=(0, 14))
         self.chat_display.grid_columnconfigure(0, weight=1)
 
         # Chat input frame
-        input_frame = ctk.CTkFrame(chat_container)
+        input_frame = ctk.CTkFrame(chat_container, fg_color="#252a32")
         input_frame.grid(row=2, column=1, sticky="ew")
         input_frame.grid_columnconfigure(0, weight=1)
 
         self.chat_entry = ctk.CTkEntry(
             input_frame,
             placeholder_text="Ask me anything about this artwork...",
-            font=ctk.CTkFont(size=14),
+            font=ctk.CTkFont(size=15),
+            corner_radius=10,
         )
-        self.chat_entry.grid(row=0, column=0, sticky="ew", padx=(10, 5), pady=10)
+        self.chat_entry.grid(row=0, column=0, sticky="ew", padx=(12, 6), pady=12)
         self.chat_entry.bind("<Return>", lambda event: self.send_message())
 
         send_button = ctk.CTkButton(
@@ -475,9 +510,11 @@ Search Type: {self.current_artwork.search_type}"""
             text="Send",
             command=self.send_message,
             width=80,
-            font=ctk.CTkFont(size=14),
+            font=ctk.CTkFont(size=15),
+            corner_radius=10,
+            hover_color="#2B5CE6",
         )
-        send_button.grid(row=0, column=1, padx=(5, 10), pady=10)
+        send_button.grid(row=0, column=1, padx=(6, 12), pady=12)
 
         # Update chat display
         self.update_chat_display()
@@ -523,9 +560,10 @@ Search Type: {self.current_artwork.search_type}"""
         for widget in self.chat_display.winfo_children():
             widget.destroy()
 
-        # Display chat history
+        # Display chat history with alternating backgrounds
         for i, message in enumerate(self.chat_history):
-            message_frame = ctk.CTkFrame(self.chat_display)
+            bg_color = "#23272e" if i % 2 == 0 else "#252a32"
+            message_frame = ctk.CTkFrame(self.chat_display, fg_color=bg_color)
             message_frame.grid(row=i, column=0, sticky="ew", padx=10, pady=5)
             message_frame.grid_columnconfigure(0, weight=1)
 
@@ -536,7 +574,7 @@ Search Type: {self.current_artwork.search_type}"""
             role_label = ctk.CTkLabel(
                 message_frame,
                 text=role_text,
-                font=ctk.CTkFont(size=12, weight="bold"),
+                font=ctk.CTkFont(size=13, weight="bold"),
                 text_color=role_color,
             )
             role_label.grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
@@ -545,7 +583,7 @@ Search Type: {self.current_artwork.search_type}"""
             content_label = ctk.CTkLabel(
                 message_frame,
                 text=message["content"],
-                font=ctk.CTkFont(size=12),
+                font=ctk.CTkFont(size=13),
                 wraplength=600,
                 justify="left",
             )
