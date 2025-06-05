@@ -94,3 +94,21 @@ MIT License
 - FH Campus Wien, Multilingual Technologies MSc
 - Open-source libraries: CustomTkinter, ChromaDB, SentenceTransformers, spaCy, NLTK, Pillow, etc.
 
+---
+
+## Git Maintenance: Pruning Unreachable Objects
+
+To clean up unreachable Git objects and free up space, run:
+
+```sh
+git gc --prune=now
+```
+
+If you use Git LFS, you can also remove old LFS files with:
+
+```sh
+git lfs prune
+```
+
+**Warning:** These commands permanently remove data that is no longer referenced by any commit.
+
