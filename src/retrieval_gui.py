@@ -89,6 +89,7 @@ class ThreadSafeArtSearch:
                     {
                         "sentence": doc,
                         "artwork_id": metadata["artwork_id"],
+                        "id": metadata["artwork_id"],  # Add id field for consistency
                         "title": metadata["title"],
                         "author": metadata["author"],
                         "type": metadata["type"],
@@ -129,6 +130,7 @@ class ThreadSafeArtSearch:
                     {
                         "description": doc,
                         "artwork_id": metadata["artwork_id"],
+                        "id": metadata["artwork_id"],  # Add id field for consistency
                         "title": metadata["title"],
                         "author": metadata["author"],
                         "type": metadata["type"],

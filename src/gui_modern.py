@@ -62,17 +62,18 @@ class ArtRAGModernGUI:
     def setup_main_layout(self):
         """Setup the main layout with sidebar navigation."""
         # Configure grid weights
-        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_columnconfigure(2, weight=1)  # Main content column
         self.root.grid_rowconfigure(0, weight=1)
 
         # Create sidebar
         self.sidebar = ctk.CTkFrame(self.root, width=200, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(4, weight=1)  # Empty space
+        self.sidebar.grid_propagate(False)  # Maintain fixed width
 
-        # Sidebar title with icon
+        # Sidebar title
         self.logo_label = ctk.CTkLabel(
-            self.sidebar, text="🎨 ArtRAG", font=ctk.CTkFont(size=26, weight="bold")
+            self.sidebar, text="ArtRAG", font=ctk.CTkFont(size=26, weight="bold")
         )
         self.logo_label.grid(row=0, column=0, padx=20, pady=(24, 12))
 
@@ -81,13 +82,13 @@ class ArtRAGModernGUI:
 
         def highlight_nav(btn):
             if self.active_nav_btn:
-                self.active_nav_btn.configure(fg_color=None)
+                self.active_nav_btn.configure(fg_color='transparent')
             btn.configure(fg_color=("#1a1a1a", "#333333"))
             self.active_nav_btn = btn
 
         self.welcome_btn = ctk.CTkButton(
             self.sidebar,
-            text="🏠 Search",
+            text="Search",
             command=lambda: [highlight_nav(self.welcome_btn), self.show_welcome_page()],
             height=44,
             font=ctk.CTkFont(size=15, weight="bold"),
@@ -98,7 +99,7 @@ class ArtRAGModernGUI:
 
         self.results_btn = ctk.CTkButton(
             self.sidebar,
-            text="📋 Results",
+            text="Results",
             command=lambda: [highlight_nav(self.results_btn), self.show_results_page()],
             height=44,
             font=ctk.CTkFont(size=15, weight="bold"),
@@ -110,7 +111,7 @@ class ArtRAGModernGUI:
 
         self.chat_btn = ctk.CTkButton(
             self.sidebar,
-            text="💬 Chat",
+            text="Chat",
             command=lambda: [highlight_nav(self.chat_btn), self.show_chat_page()],
             height=44,
             font=ctk.CTkFont(size=15, weight="bold"),
@@ -203,9 +204,10 @@ class ArtRAGModernGUI:
         # Search type selection
         search_type_frame = ctk.CTkFrame(search_frame, fg_color="#23272e")
         search_type_frame.grid(row=2, column=0, sticky="ew", padx=24, pady=12)
+        search_type_frame.grid_columnconfigure(1, weight=1)
 
         search_type_label = ctk.CTkLabel(search_type_frame, text="Search Type:")
-        search_type_label.grid(row=0, column=0, padx=12, pady=12)
+        search_type_label.grid(row=0, column=0, padx=12, pady=12, sticky="w")
 
         self.search_type_var = ctk.StringVar(value="comprehensive")
         search_type_menu = ctk.CTkOptionMenu(
@@ -295,6 +297,13 @@ class ArtRAGModernGUI:
         results_container = ctk.CTkScrollableFrame(self.main_frame, fg_color="#23272e")
         results_container.grid(row=0, column=0, sticky="nsew", padx=32, pady=32)
         results_container.grid_columnconfigure((0, 1, 2, 3), weight=1)
+
+        # Configure dynamic row weights for proper spacing
+        max_rows = (
+            len(self.search_results) // 4
+        ) + 2  # +2 for title and potential overflow
+        for row_idx in range(1, max_rows):
+            results_container.grid_rowconfigure(row_idx, weight=1)
 
         # Title
         title_label = ctk.CTkLabel(
@@ -389,7 +398,7 @@ class ArtRAGModernGUI:
             # Chat button
             chat_button = ctk.CTkButton(
                 result_card,
-                text="💬 Chat",
+                text="Chat",
                 command=lambda r=result: self.start_chat_with_artwork(r),
                 height=34,
                 font=ctk.CTkFont(size=13),
@@ -532,27 +541,46 @@ class ArtRAGModernGUI:
         self.chat_history.append({"role": "user", "content": message})
         self.update_chat_display()
 
-        # Generate response in a separate thread
-        def generate_response():
+        # Add placeholder for assistant response
+        self.chat_history.append({"role": "assistant", "content": "Thinking..."})
+        assistant_message_index = len(self.chat_history) - 1
+        self.update_chat_display()
+
+        # Generate streaming response in a separate thread
+        def generate_streaming_response():
             try:
-                response = self.ollama_rag.generate_response(
+                full_response = ""
+
+                # Use the streaming generator
+                for chunk in self.ollama_rag.generate_response_stream(
                     query=message,
                     context_results=[self.current_artwork],
                     max_context_length=2000,
-                    temperature=0.7,
-                )
+                    temperature=0.3,
+                ):
+                    full_response += chunk
 
-                # Add response to history
-                self.chat_history.append({"role": "assistant", "content": response})
-                self.root.after(0, self.update_chat_display)
+                    # Update the assistant message with the accumulated response
+                    # Update every chunk for real-time streaming effect
+                    self.chat_history[assistant_message_index][
+                        "content"
+                    ] = full_response
+                    self.root.after(0, self.update_chat_display)
+
+                # Ensure we have a final response
+                if not full_response.strip():
+                    self.chat_history[assistant_message_index][
+                        "content"
+                    ] = "Sorry, I couldn't generate a response."
+                    self.root.after(0, self.update_chat_display)
 
             except Exception as e:
                 logger.error(f"Error generating response: {e}")
                 error_msg = f"Sorry, I encountered an error: {str(e)}"
-                self.chat_history.append({"role": "assistant", "content": error_msg})
+                self.chat_history[assistant_message_index]["content"] = error_msg
                 self.root.after(0, self.update_chat_display)
 
-        threading.Thread(target=generate_response, daemon=True).start()
+        threading.Thread(target=generate_streaming_response, daemon=True).start()
 
     def update_chat_display(self):
         """Update the chat display with current history."""
@@ -589,8 +617,13 @@ class ArtRAGModernGUI:
             )
             content_label.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
 
-        # Scroll to bottom
-        self.chat_display._parent_canvas.yview_moveto(1.0)
+        # Scroll to bottom with error handling
+        try:
+            self.root.after(
+                100, lambda: self.chat_display._parent_canvas.yview_moveto(1.0)
+            )
+        except Exception as e:
+            logger.warning(f"Could not scroll chat display: {e}")
 
     def run(self):
         """Start the GUI application."""

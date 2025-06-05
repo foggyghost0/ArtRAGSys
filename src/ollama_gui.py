@@ -4,9 +4,11 @@ Provides RAG capabilities for the ArtRAG System GUI.
 """
 
 import requests
-from typing import List, Optional
+from typing import List, Optional, Generator
 from pathlib import Path
 import logging
+import json
+import base64
 from dataclasses import dataclass
 
 from retrieval_gui import ThreadSafeArtSearch
@@ -61,11 +63,41 @@ class OllamaArtRAGGUI:
         try:
             response = requests.get(f"{self.ollama_host}/api/version", timeout=5)
             response.raise_for_status()
-            logger.info("Successfully connected to Ollama server")
+
+            # Try to parse the response to ensure it's valid JSON
+            version_info = response.json()
+            logger.info(f"Successfully connected to Ollama server: {version_info}")
+
+            # Also check if the model is available
+            try:
+                model_response = requests.get(f"{self.ollama_host}/api/tags", timeout=5)
+                model_response.raise_for_status()
+                models_info = model_response.json()
+
+                available_models = [
+                    model["name"] for model in models_info.get("models", [])
+                ]
+                if self.model_name in available_models:
+                    logger.info(f"Model {self.model_name} is available")
+                else:
+                    logger.warning(
+                        f"Model {self.model_name} not found. Available models: {available_models}"
+                    )
+
+            except Exception as model_check_error:
+                logger.warning(
+                    f"Could not verify model availability: {model_check_error}"
+                )
+
             return True
+
         except requests.RequestException as e:
             logger.warning(f"Could not connect to Ollama server: {e}")
             logger.warning("Chat functionality will be limited without Ollama")
+            return False
+        except ValueError as json_error:
+            logger.error(f"Invalid JSON response from Ollama server: {json_error}")
+            logger.error(f"Response content: {response.text[:200]}...")
             return False
 
     def search_artworks(
@@ -184,34 +216,78 @@ Relevance: {result.relevance_score:.3f}
 
             context = "\n".join(context_parts)
 
-            # Create prompt
-            prompt = f"""You are an expert art historian and curator. Use the following artwork information to answer the user's question comprehensively and accurately.
+            # Prepare images for multimodal input
+            images = []
+            image_descriptions = []
+            for result in context_results:
+                if result.image_path and Path(result.image_path).exists():
+                    encoded_image = self.encode_image_to_base64(result.image_path)
+                    if encoded_image:
+                        images.append(encoded_image)
+                        image_descriptions.append(
+                            f"Image of '{result.title}' by {result.author}"
+                        )
+
+            # Create prompt with image awareness
+            image_context = ""
+            if images:
+                image_context = f"\n\nYou can also see {len(images)} image(s) of the artwork(s): {', '.join(image_descriptions)}. Use visual details from the image(s) to enhance your response."
+
+            prompt = f"""You are an expert art historian and curator. Use the following artwork information and any provided images to answer the user's question comprehensively and accurately.
 
 Context from Art Database:
-{context}
+{context}{image_context}
 
 User Question: {query}
 
-Please provide a detailed, informative response based on the retrieved artwork information. Include specific details about the artworks, artists, and relevant art historical context when available.
-DO NOT include any information that is not present in the provided context.
+Please provide a detailed, informative response based on the retrieved artwork information and visual analysis if images are provided. Include specific details about the artworks, artists, visual elements, composition, style, and relevant art historical context when available.
+DO NOT include any information that is not present in the provided context or visible in the images.
 Please ensure your response is clear, concise, and relevant to the user's query.
 """
 
-            # Generate response with Ollama
+            # Prepare request payload
+            request_payload = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": True,  # Enable streaming
+                "options": {"temperature": temperature, "top_p": 0.9, "top_k": 30},
+            }
+
+            # Add images to payload if available
+            if images:
+                request_payload["images"] = images
+
+            # Generate response with Ollama using streaming
             response = requests.post(
                 f"{self.ollama_host}/api/generate",
-                json={
-                    "model": self.model_name,
-                    "prompt": prompt,
-                    "stream": True,
-                    "options": {"temperature": temperature, "top_p": 0.9, "top_k": 30},
-                },
+                json=request_payload,
                 timeout=250,
+                stream=True,  # Enable streaming in requests
             )
             response.raise_for_status()
 
-            result = response.json()
-            return result.get("response", "Error generating response")
+            # Parse the streaming JSON response
+            full_response = ""
+            try:
+                for line in response.iter_lines():
+                    if line:
+                        # Each line is a JSON object
+                        chunk_data = json.loads(line.decode("utf-8"))
+
+                        # Extract the response text from this chunk
+                        chunk_text = chunk_data.get("response", "")
+                        full_response += chunk_text
+
+                        # Check if this is the final chunk
+                        if chunk_data.get("done", False):
+                            break
+
+                return full_response if full_response else "Error generating response"
+
+            except json.JSONDecodeError as json_error:
+                logger.error(f"JSON parsing error: {json_error}")
+                logger.error(f"Response content: {response.text[:200]}...")
+                return "Error: Invalid response format from Ollama server"
 
         except requests.RequestException as e:
             logger.error(f"Error connecting to Ollama: {e}")
@@ -219,6 +295,150 @@ Please ensure your response is clear, concise, and relevant to the user's query.
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             return f"Error generating response: {str(e)}"
+
+    def generate_response_stream(
+        self,
+        query: str,
+        context_results: List[SearchResult],
+        max_context_length: int = 2000,
+        temperature: float = 0.7,
+    ) -> Generator[str, None, None]:
+        """
+        Generate a streaming response using Ollama with retrieved context.
+
+        Args:
+            query: User query
+            context_results: Retrieved artwork information
+            max_context_length: Maximum context length in characters
+            temperature: Generation temperature
+
+        Yields:
+            str: Each chunk of the generated response as it's received
+        """
+        try:
+            # Build context from search results
+            context_parts = []
+            current_length = 0
+
+            for result in context_results:
+                if current_length >= max_context_length:
+                    break
+
+                context_part = f"""
+Artwork: {result.title}
+Artist: {result.author}
+Content: {result.content}
+Relevance: {result.relevance_score:.3f}
+---"""
+
+                if current_length + len(context_part) <= max_context_length:
+                    context_parts.append(context_part)
+                    current_length += len(context_part)
+
+            context = "\n".join(context_parts)
+
+            # Prepare images for multimodal input
+            images = []
+            image_descriptions = []
+            for result in context_results:
+                if result.image_path and Path(result.image_path).exists():
+                    encoded_image = self.encode_image_to_base64(result.image_path)
+                    if encoded_image:
+                        images.append(encoded_image)
+                        image_descriptions.append(
+                            f"Image of '{result.title}' by {result.author}"
+                        )
+
+            # Create prompt with image awareness
+            image_context = ""
+            if images:
+                image_context = f"\n\nYou can also see {len(images)} image(s) of the artwork(s): {', '.join(image_descriptions)}. Use visual details from the image(s) to enhance your response."
+
+            prompt = f"""You are an expert art historian and curator. Use the following artwork information and any provided images to answer the user's question comprehensively and accurately.
+
+Context from Art Database:
+{context}{image_context}
+
+User Question: {query}
+
+Please provide a detailed, informative response based on the retrieved artwork information and visual analysis if images are provided. Include specific details about the artworks, artists, visual elements, composition, style, and relevant art historical context when available.
+DO NOT include any information that is not present in the provided context or visible in the images.
+Please ensure your response is clear, concise, and relevant to the user's query.
+"""
+
+            # Prepare request payload
+            request_payload = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": True,
+                "options": {"temperature": temperature, "top_p": 0.9, "top_k": 30},
+            }
+
+            # Add images to payload if available
+            if images:
+                request_payload["images"] = images
+
+            # Generate streaming response with Ollama
+            response = requests.post(
+                f"{self.ollama_host}/api/generate",
+                json=request_payload,
+                timeout=250,
+                stream=True,
+            )
+            response.raise_for_status()
+
+            # Stream the response chunks
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        line_text = line.decode("utf-8").strip()
+                        if not line_text:
+                            continue
+
+                        chunk_data = json.loads(line_text)
+                        chunk_text = chunk_data.get("response", "")
+
+                        if chunk_text:
+                            yield chunk_text
+
+                        # Check if this is the final chunk
+                        if chunk_data.get("done", False):
+                            break
+
+                    except json.JSONDecodeError as e:
+                        logger.warning(
+                            f"Skipping invalid JSON chunk: {line_text[:100]}... - Error: {e}"
+                        )
+                        continue
+                    except UnicodeDecodeError as e:
+                        logger.warning(f"Skipping invalid Unicode chunk: {e}")
+                        continue
+
+        except requests.RequestException as e:
+            logger.error(f"Error connecting to Ollama: {e}")
+            yield f"Sorry, I cannot generate a response right now. Please make sure Ollama is running with the {self.model_name} model."
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            yield f"Error generating response: {str(e)}"
+
+    @staticmethod
+    def encode_image_to_base64(image_path: str) -> Optional[str]:
+        """
+        Encode an image file to base64 string for multimodal LLM input.
+
+        Args:
+            image_path: Path to the image file
+
+        Returns:
+            Base64 encoded string or None if encoding fails
+        """
+        try:
+            with open(image_path, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                return encoded_string
+        except Exception as e:
+            logger.error(f"Error encoding image {image_path}: {e}")
+            return None
 
     def close(self):
         """Close database connections."""
