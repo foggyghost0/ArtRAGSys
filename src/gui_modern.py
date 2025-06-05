@@ -81,8 +81,12 @@ class ArtRAGModernGUI:
         self.active_nav_btn = None
 
         def highlight_nav(btn):
-            if self.active_nav_btn:
-                self.active_nav_btn.configure(fg_color='transparent')
+            if self.active_nav_btn and hasattr(self.active_nav_btn, "configure"):
+                try:
+                    # Reset to default button color
+                    self.active_nav_btn.configure(fg_color=("gray75", "gray25"))
+                except Exception as e:
+                    logger.warning(f"Could not reset navigation button color: {e}")
             btn.configure(fg_color=("#1a1a1a", "#333333"))
             self.active_nav_btn = btn
 
