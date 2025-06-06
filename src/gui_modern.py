@@ -213,17 +213,19 @@ class ArtRAGModernGUI:
         search_type_label = ctk.CTkLabel(search_type_frame, text="Search Type:")
         search_type_label.grid(row=0, column=0, padx=12, pady=12, sticky="w")
 
-        self.search_type_var = ctk.StringVar(value="comprehensive")
+        self.search_type_var = ctk.StringVar(value="advanced_hybrid")
         search_type_menu = ctk.CTkOptionMenu(
             search_type_frame,
             variable=self.search_type_var,
             values=[
-                "comprehensive",
+                "advanced_hybrid",
+                "bm25",
+                "rrf_only",
                 "semantic",
-                "text",
                 "fuzzy",
-                "hybrid",
                 "hybrid_scoring",
+                "comprehensive",
+                "text",
                 "metadata",
             ],
         )

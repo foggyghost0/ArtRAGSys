@@ -122,8 +122,20 @@ class OllamaArtRAGGUI:
         try:
             # Choose search method based on type
             if search_type == "comprehensive":
-                results = self.art_search.comprehensive_search(
+                results = self.art_search.enhanced_comprehensive_search(
                     query, search_type="comprehensive", k=k
+                )
+            elif search_type == "advanced_hybrid":
+                results = self.art_search.enhanced_comprehensive_search(
+                    query, search_type="advanced_hybrid", k=k
+                )
+            elif search_type == "bm25":
+                results = self.art_search.enhanced_comprehensive_search(
+                    query, search_type="bm25", k=k
+                )
+            elif search_type == "rrf_only":
+                results = self.art_search.enhanced_comprehensive_search(
+                    query, search_type="rrf_only", k=k
                 )
             elif search_type == "semantic":
                 results = self.art_search.semantic_retrieval(query, k=k)
@@ -133,11 +145,9 @@ class OllamaArtRAGGUI:
                 results = self.art_search.fuzzy_keyword_retrieval(query, k=k)
             elif search_type == "hybrid_scoring":
                 results = self.art_search.hybrid_scoring_retrieval(query, k=k)
-            elif search_type == "hybrid":
-                results = self.art_search.hybrid_retrieval(query, k=k)
             elif search_type == "metadata":
-                # Use comprehensive search which includes metadata extraction
-                results = self.art_search.comprehensive_search(
+                # Use enhanced comprehensive search which includes metadata extraction
+                results = self.art_search.enhanced_comprehensive_search(
                     query, search_type="comprehensive", k=k
                 )
             else:
