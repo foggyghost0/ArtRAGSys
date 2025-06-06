@@ -194,35 +194,6 @@ class ThreadSafeArtSearch:
             print(f"Error getting artwork by ID: {e}")
             return None
 
-    def comprehensive_search(
-        self, query: str, search_type: str = "all", k: int = 12
-    ) -> List[Dict[str, Any]]:
-        """
-        Original comprehensive search - kept for backward compatibility.
-
-        Note: All GUI integrations now use enhanced_comprehensive_search()
-        for access to advanced ranking methods including BM25, RRF, and
-        advanced hybrid approaches.
-
-        Args:
-            query: Search query
-            search_type: Type of search ("all", "semantic", "keyword", "comprehensive")
-            k: Number of results to return
-        """
-        try:
-            if search_type == "semantic":
-                return self._semantic_only_search(query, k)
-            elif search_type == "keyword":
-                return self._keyword_only_search(query, k)
-            elif search_type == "comprehensive":
-                return self._comprehensive_nlp_search(query, k)
-            else:  # "all"
-                return self._hybrid_search(query, k)
-
-        except Exception as e:
-            print(f"Error in comprehensive search: {e}")
-            return []
-
     def _semantic_only_search(self, query: str, k: int) -> List[Dict[str, Any]]:
         """Semantic search only with improved scoring."""
         sentence_results = self.semantic_search_sentences(query, k * 2)
@@ -274,62 +245,6 @@ class ThreadSafeArtSearch:
 
         # Normalize scores
         return self._normalize_scores(results, "relevance_score")
-
-    def _keyword_only_search(self, query: str, k: int) -> List[Dict[str, Any]]:
-        """Keyword-based search only."""
-        try:
-            conn = self._get_db_connection()
-            cursor = conn.cursor()
-
-            # Simple keyword search across multiple fields
-            search_query = f"%{query}%"
-            cursor.execute(
-                """
-                SELECT image_file, author, title, medium, dimensions, date, type, school, 
-                       timeframe_start, timeframe_end, full_description
-                FROM artworks 
-                WHERE title LIKE ? OR author LIKE ? OR full_description LIKE ? 
-                   OR type LIKE ? OR school LIKE ? OR medium LIKE ?
-                LIMIT ?
-            """,
-                (
-                    search_query,
-                    search_query,
-                    search_query,
-                    search_query,
-                    search_query,
-                    search_query,
-                    k,
-                ),
-            )
-
-            results = []
-            for row in cursor.fetchall():
-                artwork = {
-                    "id": row[0],  # image_file as id
-                    "image_file": row[0],
-                    "author": row[1],
-                    "title": row[2],
-                    "medium": row[3],
-                    "dimensions": row[4],
-                    "date": row[5],
-                    "type": row[6],
-                    "school": row[7],
-                    "timeframe_start": row[8],
-                    "timeframe_end": row[9],
-                    "description": row[10],
-                    # Add compatibility fields
-                    "technique": row[3],
-                    "timeframe": f"{row[8]}-{row[9]}" if row[8] and row[9] else row[5],
-                    "relevance_score": 0.5,  # Default score for keyword matches
-                }
-                results.append(artwork)
-
-            return results
-
-        except Exception as e:
-            print(f"Error in keyword search: {e}")
-            return []
 
     def _comprehensive_nlp_search(self, query: str, k: int) -> List[Dict[str, Any]]:
         """Comprehensive search with NLP metadata extraction."""
@@ -504,33 +419,6 @@ class ThreadSafeArtSearch:
         except Exception as e:
             print(f"Error in filtered search: {e}")
             return self._semantic_only_search(query, k)
-
-    def _hybrid_search(self, query: str, k: int) -> List[Dict[str, Any]]:
-        """Hybrid search combining semantic and keyword approaches using RRF."""
-        # Get results from both approaches
-        semantic_results = self._semantic_only_search(query, k * 2)
-        keyword_results = self._keyword_only_search(query, k * 2)
-
-        # Prepare ranked lists for RRF
-        ranked_lists = []
-
-        if semantic_results:
-            ranked_lists.append(semantic_results)
-
-        if keyword_results:
-            # Normalize keyword results first
-            keyword_normalized = self._normalize_scores(
-                keyword_results, "relevance_score"
-            )
-            ranked_lists.append(keyword_normalized)
-
-        if not ranked_lists:
-            return []
-
-        # Use RRF to combine results
-        rrf_results = self._reciprocal_rank_fusion(ranked_lists, k=60)
-
-        return rrf_results[:k]
 
     def close(self):
         """Close database connections."""
@@ -819,18 +707,28 @@ class ThreadSafeArtSearch:
 
         Args:
             query: Search query
-            search_type: Type of search ("advanced_hybrid", "bm25", "rrf_only", "semantic", "keyword", "comprehensive")
+            search_type: Type of search ("advanced_hybrid", "bm25", "rrf_only", "semantic", "fuzzy", "metadata")
             k: Number of results to return
         """
         try:
+            # Map legacy search types to new methods
+            if search_type in [
+                "all",
+                "comprehensive",
+                "keyword",
+                "text",
+                "hybrid_scoring",
+            ]:
+                search_type = "advanced_hybrid"
+
             if search_type == "advanced_hybrid":
                 return self.advanced_hybrid_retrieval(query, k)
             elif search_type == "bm25":
                 return self._enhanced_keyword_search(query, k)
             elif search_type == "rrf_only":
-                # RRF of semantic and original methods
+                # RRF of semantic and BM25 keyword search
                 semantic_results = self.semantic_search_descriptions(query, k * 2)
-                keyword_results = self._keyword_only_search(query, k * 2)
+                keyword_results = self._enhanced_keyword_search(query, k * 2)
                 ranked_lists = (
                     [semantic_results, keyword_results]
                     if semantic_results and keyword_results
@@ -840,26 +738,19 @@ class ThreadSafeArtSearch:
                     rrf_results = self._reciprocal_rank_fusion(ranked_lists)
                     return rrf_results[:k]
                 return []
+            elif search_type == "semantic":
+                return self._semantic_only_search(query, k)
+            elif search_type == "fuzzy":
+                return self.fuzzy_keyword_retrieval(query, k)
+            elif search_type == "metadata":
+                return self._comprehensive_nlp_search(query, k)
             else:
-                # Fall back to existing methods
-                return self.comprehensive_search(query, search_type, k)
+                # Default to advanced hybrid for unknown types
+                return self.advanced_hybrid_retrieval(query, k)
 
         except Exception as e:
             print(f"Error in enhanced comprehensive search: {e}")
             return []
-
-    def semantic_retrieval(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Semantic retrieval using ChromaDB embeddings."""
-        return self.semantic_search_sentences(query, k)
-
-    def keyword_retrieval(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """
-        Basic keyword-based retrieval using SQL LIKE.
-
-        NOTE: Consider using enhanced_comprehensive_search(query, 'bm25')
-        for better keyword ranking with BM25 algorithm.
-        """
-        return self._keyword_only_search(query, k)
 
     def fuzzy_keyword_retrieval(
         self, query: str, k: int = 5, threshold: int = 70
@@ -921,57 +812,3 @@ class ThreadSafeArtSearch:
         except Exception as e:
             print(f"Error in fuzzy keyword search: {e}")
             return []
-
-    def hybrid_scoring_retrieval(
-        self,
-        query: str,
-        k: int = 12,
-        fuzzy_weight: float = 0.4,
-        semantic_weight: float = 0.6,
-    ) -> List[Dict[str, Any]]:
-        """Hybrid scoring retrieval: combine semantic and fuzzy keyword scores with normalization."""
-        semantic_results = self.semantic_retrieval(query, k * 2)
-        fuzzy_results = self.fuzzy_keyword_retrieval(query, k * 2)
-
-        # Normalize scores first
-        semantic_normalized = self._normalize_scores(
-            semantic_results, "relevance_score"
-        )
-        fuzzy_normalized = self._normalize_scores(fuzzy_results, "relevance_score")
-
-        # Index by artwork id
-        combined = {}
-        for art in semantic_normalized:
-            combined[art["id"]] = {
-                "semantic": art.get(
-                    "relevance_score_normalized", art.get("relevance_score", 0.0)
-                ),
-                "fuzzy": 0.0,
-                "artwork": art,
-            }
-        for art in fuzzy_normalized:
-            if art["id"] in combined:
-                combined[art["id"]]["fuzzy"] = art.get(
-                    "relevance_score_normalized", art.get("relevance_score", 0.0)
-                )
-            else:
-                combined[art["id"]] = {
-                    "semantic": 0.0,
-                    "fuzzy": art.get(
-                        "relevance_score_normalized", art.get("relevance_score", 0.0)
-                    ),
-                    "artwork": art,
-                }
-        # Compute hybrid score
-        scored = []
-        for entry in combined.values():
-            hybrid_score = (
-                semantic_weight * entry["semantic"] + fuzzy_weight * entry["fuzzy"]
-            )
-            entry["artwork"]["hybrid_score"] = hybrid_score
-            entry["artwork"]["relevance_score"] = hybrid_score
-            scored.append(entry["artwork"])
-        scored.sort(key=lambda x: x["hybrid_score"], reverse=True)
-
-        # Normalize final hybrid scores
-        return self._normalize_scores(scored[:k], "hybrid_score")

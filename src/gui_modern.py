@@ -223,9 +223,6 @@ class ArtRAGModernGUI:
                 "rrf_only",
                 "semantic",
                 "fuzzy",
-                "hybrid_scoring",
-                "comprehensive",
-                "text",
                 "metadata",
             ],
         )
